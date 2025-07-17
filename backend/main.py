@@ -1,10 +1,18 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import json
 from datetime import datetime
 import uuid
+from sqlalchemy.orm import Session
+
+# Import database and models
+from database import get_db, engine
+from models import Base, Item as ItemModel
+
+# Create database tables
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Python React App", version="1.0.0")
 
@@ -33,9 +41,6 @@ class Item(ItemBase):
 
     class Config:
         from_attributes = True
-
-# In-memory storage (replace with database in production)
-items_db = {}
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -70,7 +75,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Helper function to convert datetime to ISO string for JSON serialization
-def item_to_dict(item: Item):
+def item_to_dict(item: ItemModel):
     return {
         "id": item.id,
         "title": item.title,
@@ -86,67 +91,72 @@ async def root():
     return {"message": "Python React App Backend", "status": "running"}
 
 @app.get("/api/items", response_model=List[Item])
-async def get_items():
-    return list(items_db.values())
+async def get_items(db: Session = Depends(get_db)):
+    items = db.query(ItemModel).all()
+    return items
 
 @app.post("/api/items", response_model=Item)
-async def create_item(item: ItemCreate):
-    item_id = str(uuid.uuid4())
-    now = datetime.utcnow()
-    
-    new_item = Item(
-        id=item_id,
+async def create_item(item: ItemCreate, db: Session = Depends(get_db)):
+    db_item = ItemModel(
+        id=str(uuid.uuid4()),
         title=item.title,
         description=item.description,
-        completed=item.completed,
-        created_at=now,
-        updated_at=now
+        completed=item.completed
     )
     
-    items_db[item_id] = new_item
-    print(f"Created item: {item_id} - '{item.title}'")
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    
+    print(f"Created item: {db_item.id} - '{item.title}'")
     
     # Broadcast to all connected clients
     message = json.dumps({
         "type": "item_created",
-        "item": item_to_dict(new_item)
+        "item": item_to_dict(db_item)
     })
     await manager.broadcast(message)
     
-    return new_item
+    return db_item
 
 @app.get("/api/items/{item_id}", response_model=Item)
-async def get_item(item_id: str):
-    if item_id not in items_db:
+async def get_item(item_id: str, db: Session = Depends(get_db)):
+    item = db.query(ItemModel).filter(ItemModel.id == item_id).first()
+    if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    return items_db[item_id]
+    return item
 
 @app.put("/api/items/{item_id}", response_model=Item)
-async def update_item(item_id: str, item: ItemCreate):
-    if item_id not in items_db:
+async def update_item(item_id: str, item: ItemCreate, db: Session = Depends(get_db)):
+    db_item = db.query(ItemModel).filter(ItemModel.id == item_id).first()
+    if not db_item:
         raise HTTPException(status_code=404, detail="Item not found")
     
-    existing_item = items_db[item_id]
-    existing_item.title = item.title
-    existing_item.description = item.description
-    existing_item.completed = item.completed
-    existing_item.updated_at = datetime.utcnow()
+    db_item.title = item.title
+    db_item.description = item.description
+    db_item.completed = item.completed
+    db_item.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(db_item)
     
     # Broadcast to all connected clients
     message = json.dumps({
         "type": "item_updated",
-        "item": item_to_dict(existing_item)
+        "item": item_to_dict(db_item)
     })
     await manager.broadcast(message)
     
-    return existing_item
+    return db_item
 
 @app.delete("/api/items/{item_id}")
-async def delete_item(item_id: str):
-    if item_id not in items_db:
+async def delete_item(item_id: str, db: Session = Depends(get_db)):
+    db_item = db.query(ItemModel).filter(ItemModel.id == item_id).first()
+    if not db_item:
         raise HTTPException(status_code=404, detail="Item not found")
     
-    deleted_item = items_db.pop(item_id)
+    db.delete(db_item)
+    db.commit()
     
     # Broadcast to all connected clients
     message = json.dumps({

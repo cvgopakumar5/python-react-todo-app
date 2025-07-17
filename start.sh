@@ -1,64 +1,48 @@
 #!/bin/bash
 
-echo "🚀 Starting Python React Full-Stack App..."
+echo "🚀 Starting Python React Full-Stack App with MySQL..."
 
-# Check if Python is installed
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 is not installed. Please install Python 3 first."
+# Check if Docker is installed
+if ! command -v docker &> /dev/null; then
+    echo "❌ Docker is not installed. Please install Docker first."
     exit 1
 fi
 
-# Check if Node.js is installed
-if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed. Please install Node.js first."
+# Check if Docker Compose is installed
+if ! command -v docker-compose &> /dev/null; then
+    echo "❌ Docker Compose is not installed. Please install Docker Compose first."
     exit 1
 fi
 
-# Check if npm is installed
-if ! command -v npm &> /dev/null; then
-    echo "❌ npm is not installed. Please install npm first."
-    exit 1
-fi
+# Stop any existing containers
+echo "🛑 Stopping any existing containers..."
+docker-compose down
 
-echo "📦 Setting up backend..."
-cd backend
+# Build and start all services
+echo "📦 Building and starting services..."
+docker-compose up --build -d
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
-    echo "Creating virtual environment..."
-    python3 -m venv venv
-fi
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install dependencies
-echo "Installing Python dependencies..."
-pip install -r requirements.txt
-
-# Start backend in background
-echo "Starting backend server..."
-uvicorn main:app --reload --host 0.0.0.0 --port 8000 &
-BACKEND_PID=$!
-
-cd ../frontend
-
-# Install dependencies
-echo "📦 Setting up frontend..."
-npm install
-
-# Start frontend
-echo "Starting frontend server..."
-npm start &
-FRONTEND_PID=$!
-
-echo "✅ Both servers are starting..."
+echo "✅ All services are starting..."
 echo "🌐 Backend: http://localhost:8000"
 echo "🌐 Frontend: http://localhost:3000"
 echo "📚 API Docs: http://localhost:8000/docs"
+echo "🗄️  MySQL: localhost:3309"
 echo ""
-echo "Press Ctrl+C to stop both servers"
+echo "📊 To view logs: docker-compose logs -f"
+echo "🛑 To stop: docker-compose down"
+echo ""
+echo "Waiting for services to be ready..."
 
-# Wait for user to stop
-trap "echo '🛑 Stopping servers...'; kill $BACKEND_PID $FRONTEND_PID; exit" INT
-wait 
+# Wait for services to be ready
+sleep 10
+
+# Show logs
+echo "📋 Recent logs:"
+docker-compose logs --tail=20
+
+echo ""
+echo "🎉 Your app is ready! Press Ctrl+C to stop viewing logs"
+echo "The app will continue running in the background."
+
+# Follow logs
+docker-compose logs -f 
